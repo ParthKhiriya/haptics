@@ -1,0 +1,38 @@
+[project]
+name = "haptics"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "ParthKhiriya", email = "b23ee1051@iitj.ac.in" }
+]
+requires-python = ">=3.11"
+dependencies = [
+    "encodec>=0.1.1",
+    "h5py>=3.16.0",
+    "librosa>=0.11.0",
+    "matplotlib>=3.11.1",
+    "numpy>=2.4.6",
+    "scikit-learn>=1.9.0",
+    "scipy>=1.17.1",
+    "soundfile>=0.14.0",
+    "torch",
+    "torchaudio",
+    "tqdm>=4.70.0",
+]
+
+[project.scripts]
+haptics = "haptics:main"
+
+[[tool.uv.index]]
+name = "pytorch-cu121"
+url = "https://download.pytorch.org/whl/cu121"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu121" }
+torchaudio = { index = "pytorch-cu121" }
+
+[build-system]
+requires = ["uv_build>=0.12.0,<0.13.0"]
+build-backend = "uv_build"
