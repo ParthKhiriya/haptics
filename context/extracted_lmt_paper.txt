@@ -1,0 +1,252 @@
+--- PAGE 1 ---
+ LMT Haptic Texture Database
+Overview Current Haptic Database Previous Database Recordings Tactile Computer Mouse Download FAQ Contact
+ 
+ p
+ p
+Overview of Haptic Data Acquisition, Parametrization, and Display
+ p
+Collection of Building Material Haptic Database
+We provide a large collection of materials based on a geological, chemical and biological naming convention.
+17/08/2026, 14:31 LMT Haptic Texture Database
+https://zeus.lkn.ei.tum.de/downloads/texture/#download 1/23
+--- PAGE 2 ---
+C1 Wood
+Processing Shape P Moisture Content
+P1 veneered, tangential section X1 dry
+P2 veneered, cross section Xy percentage of water in y %
+P3 veneered, sliced/peeled
+P4 natural, tangential section
+P5 natural, cross section
+P6 natural, sliced/peeled
+ 1 Softwood        
+      
+ 2 Hardwood        
+17/08/2026, 14:31 LMT Haptic Texture Database
+https://zeus.lkn.ei.tum.de/downloads/texture/#download 2/23
+--- PAGE 3 ---
+Processing Shape P Composition
+P1 pressed X1 dry
+P2 natural Xy percentage of cork in y %
+S3 Barks        
+Processing Shape P Color
+P1 pressed X1 unprocessed brown
+P2 refined X2 bleached
+P3 crumpled X3 single-color painted
+P4 corrugated X4 multi-color painted
+17/08/2026, 14:31 LMT Haptic Texture Database
+https://zeus.lkn.ei.tum.de/downloads/texture/#download 3/23
+--- PAGE 4 ---
+P5 creped paper
+P6 recycled
+S4 Celluloids        
+Processing Shape P Composition
+P1 pressed X1 pure
+P2 laminated Xy percentage of main wooden component in y %
+S5 Crafted Wood        
+C2 Biodegradable
+Processing Shape P Composition
+P1 molded X1 pure
+P2 woven Xy percentage of main fibers in y %
+       
+S1 Natural Fibers        
+       
+Processing Shape P Composition
+P1 woven X1 pure
+P2 woven (flaked) Xy percentage of main fur in y %
+P3 natural
+S2 Fur        
+17/08/2026, 14:31 LMT Haptic Texture Database
+https://zeus.lkn.ei.tum.de/downloads/texture/#download 4/23
+--- PAGE 5 ---
+       
+Side P Originality X
+P1 front side X1 original
+P2 back side X2 artificial
+S3 Animal Skin
+ nd Leather        
+       
+C3 Polymers
+Processing Shape P Composition
+P1 injection-molded and flat X1 pure
+P2 injection-molded and processed Xy percentage of main polymer in y %
+P3 extruded
+P4 blown film-extruded
+P5 woven
+P6 embossed
+P7 mesh (> 5mm)
+P8 mesh (< 5mm)
+S1 Thermoplasts        
+17/08/2026, 14:31 LMT Haptic Texture Database
+https://zeus.lkn.ei.tum.de/downloads/texture/#download 5/23
+--- PAGE 6 ---
+Processing Shape P Composition
+P1 pressed X1 pure
+P2 perforated Xy percentage of main polymer in y %
+P3 moulded
+S2 Thermosets        
+Processing Shape P Composition
+P1 injection-molded X1 pure
+P2 foamed Xy percentage of main polymer in y %
+P3 perforated
+S3 Elastomers        
+Processing Shape P Composition
+P1 extruded X1 pure
+Xy percentage of main carbon component in y %
+S4 Carbon Fibers        
+17/08/2026, 14:31 LMT Haptic Texture Database
+https://zeus.lkn.ei.tum.de/downloads/texture/#download 6/23
+--- PAGE 7 ---
+Processing Shape P Composition
+P1 woven X1 pure
+P2 mesh < 5mm Xy percentage of main component in y %
+P3 mesh > 5mm
+S5 Polymer
+Composites        
+       
+C4 Ceramics
+Processing Shape P Composition
+P1 sand-beamed or not glazed X1 pure
+P2 polished, glazed Xy percentage of main component in y %
+S1 Earthenware        
+S2 Stoneware    
+S3 Hightech
+Ceramics        
+       
+C5 Glasses
+Processing Shape P Opacity X
+P1 floated X1 transparent
+P2 spun X2 nontransparent
+P3 foamed Xy percentage of opacity in y %
+17/08/2026, 14:31 LMT Haptic Texture Database
+https://zeus.lkn.ei.tum.de/downloads/texture/#download 7/23
+--- PAGE 8 ---
+P4 flung
+P5 corrugated
+P6 cut
+P7 ornaments
+S1 Crafted
+Glasses        
+S2 Natural
+Glasses        
+       
+C6 Stones
+Processing Shape P Composition X
+P1 stacked X1 pure
+P2 polished Xy percentage of main stone component in y %
+P3 pointed
+P4 sanded
+P5 embossed
+S1 Ignetious        
+17/08/2026, 14:31 LMT Haptic Texture Database
+https://zeus.lkn.ei.tum.de/downloads/texture/#download 8/23
+--- PAGE 9 ---
+Processing Shape P Composition X
+P1 embossed X1
+P2 polished Xy percentage of main stone component in y %
+P3 sand-beamed
+P4 split
+P5 sanded
+S2 Sediments        
+Processing Shape P Composition X
+P1 flamed X1
+P2 sand-beamed Xy percentage of main stone component in y %
+P3 polished
+P4 pointed
+S3 Metamorphs        
+Processing Shape P Cement Standardization Specification X
+P1 beamed X1 CEM I Portland Cement
+P2 pointed X2 CEM II Portland Cement Blends
+P3 embossed X3 CEM III Slag-lime cements
+P4 axed X4 CEM IV Pozzolan Cement
+P5 charringed X5 CEM V Composite Cement
+P6 corrugated
+S4 Cement        
+       
+17/08/2026, 14:31 LMT Haptic Texture Database
+https://zeus.lkn.ei.tum.de/downloads/texture/#download 9/23
+--- PAGE 10 ---
+S5 Minerals        
+       
+C7 Metals
+Processing Shape P Composition X
+P1 steamrolled X1 pure
+P2 polished Xy percentage of main metal component in y %
+P3 casted
+S1 Ferrous        
+       
+Processing Shape P Composition X
+P1 steamrolled X1 pure
+P2 polished Xy percentage of main metal component in y %
+P3 irregularly folded
+P4 perforated (< 5mm)
+P5 perforated (> 5mm)
+6 rhombic mesh (< 5mm)
+7 rhombic mesh (> 5mm)
+P8 corrugated
+P9 square mesh
+S2 Non-Ferrous        
+S3 Alloys        
+Processing Shape P Fineness X (0000, 000, 00, 0, 1,...,5)
+17/08/2026, 14:31 LMT Haptic Texture Database
+https://zeus.lkn.ei.tum.de/downloads/texture/#download 10/23
+--- PAGE 11 ---
+P1 woven X0000 very fine
+X5 coarse
+S4 Metal Fibers        
+S5 Semiconductors        
+C8 Composites
+Processing Shape P Composition X
+P1 pressed X1 pure
+P2 covered/mixed Xy percentage of main component in y %
+P3 steamrolled
+P4 woven
+P5 sanded
+S1 Organic - Polymers        
+S2 Polymer - Stone        
+S3 Polymer - Metal        
+17/08/2026, 14:31 LMT Haptic Texture Database
+https://zeus.lkn.ei.tum.de/downloads/texture/#download 11/23
+--- PAGE 12 ---
+Processing Shape P Grit Size X (times 10)
+P1 flat X4 P 40
+X8 P 80
+X15 P 150
+X24 P 240
+X60 P 600
+S4 Wood - Stone        
+Processing Shape P Composition
+P1 woven Xy percentage of component in y %
+S5 Wood - Glass        
+       
+ p
+Current Setup - Texplorer 2
+ he following video shows our Texplorer2 device, the novel recording procedure, parametrization, and display using a novel tactile display device (TCM2).
+17/08/2026, 14:31 LMT Haptic Texture Database
+https://zeus.lkn.ei.tum.de/downloads/texture/#download 12/23
+--- PAGE 13 ---
+New Texplorer2 device.
+Old 108 Texture Database
+ ) Meshes        
+0:00 / 2:51
+17/08/2026, 14:31 LMT Haptic Texture Database
+https://zeus.lkn.ei.tum.de/downloads/texture/#download 13/23
+--- PAGE 14 ---
+      
+ ) Stones        
+       
+ ) Blank glossy
+ urfaces        
+       
+ ) Wood Types        
+17/08/2026, 14:31 LMT Haptic Texture Database
+https://zeus.lkn.ei.tum.de/downloads/texture/#download 14/23
+--- PAGE 15 ---
+       
+ ) Rubbers        
+       
+ ) Fibers        
+       
+ ) Foams        
+17/08/2026, 14:31 LMT Haptic Texture Database
+https://zeus.lkn.ei.tum.de/downloads/texture/#download 15/23

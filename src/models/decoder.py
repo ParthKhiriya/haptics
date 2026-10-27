@@ -53,9 +53,6 @@ class TactileSEANetDecoder(nn.Module):
         
         # Final projection
         self.final_conv = nn.Conv1d(channels[-1], output_dim, kernel_size=7, padding=3)
-        
-        # Output bounded scaling: tanh constrains to [-1, 1], scaled by learnable factor
-        self.output_scale = nn.Parameter(torch.tensor(3.0))
 
     def forward(self, x: torch.Tensor):
         # Input shape: [Batch, 128, 75]
@@ -72,8 +69,8 @@ class TactileSEANetDecoder(nn.Module):
         # Final channel projection
         x = self.final_conv(x)
         
-        # Bounded output activation
-        x = torch.tanh(x) * self.output_scale
+        # Linear response across target range [-5, 5] with loose safety clamp
+        x = F.hardtanh(x, min_val=-6.0, max_val=6.0)
         
         # Interpolate 9,600 frames to target length (16,000)
         x = F.interpolate(x, size=self.target_length, mode='linear', align_corners=False)
