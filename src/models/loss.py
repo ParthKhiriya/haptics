@@ -5,10 +5,10 @@ import torchaudio.transforms as T
 
 
 class TactileBandSTFTLoss(nn.Module):
-    """STFT loss with emphasis on the 50-300 Hz tactile band."""
+    """STFT loss with explicit emphasis on the sliding tactile frequency band."""
     
     def __init__(self, fft_size: int, hop_size: int, win_length: int,
-                 sample_rate: int = 16000, low_hz: float = 50.0, high_hz: float = 300.0):
+                 sample_rate: int = 16000, low_hz: float = 30.0, high_hz: float = 800.0):
         super().__init__()
         self.fft_size = fft_size
         self.hop_size = hop_size
@@ -28,11 +28,11 @@ class TactileBandSTFTLoss(nn.Module):
         
         x_mag, y_mag = x_stft.abs(), y_stft.abs()
         
-        # Full-band losses
+        # Full-band spectral losses
         sc_full = torch.norm(y_mag - x_mag, p="fro") / (torch.norm(y_mag, p="fro") + 1e-7)
         mag_full = F.l1_loss(torch.log(x_mag + 1e-7), torch.log(y_mag + 1e-7))
         
-        # Tactile-band focused losses (50-300 Hz)
+        # Tactile-band focused losses (30-800 Hz)
         x_band = x_mag[:, self.low_bin:self.high_bin, :]
         y_band = y_mag[:, self.low_bin:self.high_bin, :]
         sc_band = torch.norm(y_band - x_band, p="fro") / (torch.norm(y_band, p="fro") + 1e-7)
@@ -42,20 +42,20 @@ class TactileBandSTFTLoss(nn.Module):
 
 
 class MultiScaleEnvelopeLoss(nn.Module):
-    """RMS envelope matching at multiple time scales + Pearson correlation."""
+    """RMS envelope matching at multiple temporal scales for continuous textures."""
     
-    def __init__(self, frame_lengths=[64, 256, 1024]):
+    def __init__(self, frame_lengths=[32, 128, 512]):
         super().__init__()
         self.frame_lengths = frame_lengths
     
     def forward(self, x: torch.Tensor, y: torch.Tensor):
         total_loss = 0.0
         for fl in self.frame_lengths:
-            stride = fl // 2
+            stride = max(1, fl // 2)
             x_env = torch.sqrt(F.avg_pool1d(x ** 2, kernel_size=fl, stride=stride) + 1e-8)
             y_env = torch.sqrt(F.avg_pool1d(y ** 2, kernel_size=fl, stride=stride) + 1e-8)
             
-            # RMS envelope MSE
+            # Envelope MSE
             total_loss += F.mse_loss(x_env, y_env)
             
             # Pearson correlation loss (1 - r)
@@ -69,31 +69,31 @@ class MultiScaleEnvelopeLoss(nn.Module):
         return total_loss / len(self.frame_lengths)
 
 
-class Sound2HapLossV2(nn.Module):
-    """Redesigned composite loss for tactile signal generation."""
+class SlidingHapticLoss(nn.Module):
+    """Composite loss designed specifically for continuous sliding texture signals."""
     
     def __init__(self, sample_rate: int = 16000):
         super().__init__()
         self.sample_rate = sample_rate
         
-        # Multi-resolution STFT with tactile band emphasis
+        # Multi-resolution STFT with 30-800 Hz emphasis
         self.stft_losses = nn.ModuleList([
-            TactileBandSTFTLoss(1024, 256, 1024, sample_rate),
-            TactileBandSTFTLoss(512,  128, 512,  sample_rate),
-            TactileBandSTFTLoss(256,  64,  256,  sample_rate),
+            TactileBandSTFTLoss(1024, 256, 1024, sample_rate, low_hz=30.0, high_hz=800.0),
+            TactileBandSTFTLoss(512,  128, 512,  sample_rate, low_hz=30.0, high_hz=800.0),
+            TactileBandSTFTLoss(256,  64,  256,  sample_rate, low_hz=30.0, high_hz=800.0),
         ])
         
-        # Multi-scale envelope
-        self.envelope = MultiScaleEnvelopeLoss(frame_lengths=[64, 256, 1024])
+        # Multi-scale envelope matching suitable for 4,800-sample sequences
+        self.envelope = MultiScaleEnvelopeLoss(frame_lengths=[32, 128, 512])
         
-        # Mel spectrogram with CORRECT sample rate and tactile-focused range
+        # Mel spectrogram covering extended texture friction range (up to 4000 Hz)
         self.mel_transform = T.MelSpectrogram(
             sample_rate=sample_rate,
-            n_fft=1024,
-            hop_length=256,
+            n_fft=512,
+            hop_length=128,
             n_mels=64,
             f_min=20,
-            f_max=2000,
+            f_max=4000,
         )
     
     def forward(self, predicted: torch.Tensor, target: torch.Tensor):
@@ -118,21 +118,21 @@ class Sound2HapLossV2(nn.Module):
         # 4. Multi-scale envelope loss
         l_env = self.envelope(predicted, target)
         
-        # Combined weighted loss
+        # Combined weighted loss for continuous textures
         total_loss = (
             1.0 * l_mse +
             1.0 * l_l1 +
             1.0 * l_stft_full +
-            3.0 * l_stft_band +
+            4.0 * l_stft_band +
             2.0 * l_mel +
-            5.0 * l_env
+            6.0 * l_env
         )
         
         metrics = {
             'mse': l_mse.item(),
             'l1': l_l1.item(),
-            'stft_full': l_stft_full.item(),
-            'stft_band': l_stft_band.item(),
+            'stft_full': l_stft_full.item() if isinstance(l_stft_full, torch.Tensor) else l_stft_full,
+            'stft_band': l_stft_band.item() if isinstance(l_stft_band, torch.Tensor) else l_stft_band,
             'mel': l_mel.item(),
             'envelope': l_env.item(),
         }

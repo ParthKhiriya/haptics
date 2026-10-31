@@ -9,36 +9,40 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.data.dataset import get_dataloaders
+from src.data.dataset_sliding import get_sliding_dataloaders
 from src.models.encodec_wrapper import FrozenAudioEncoder
-from src.models.decoder import TactileSEANetDecoder
-from src.models.loss import Sound2HapLossV2
+from src.models.decoder_sliding import SlidingTactileDecoder
+from src.models.loss_sliding import SlidingHapticLoss
 
-def train():
+def train_sliding():
     # ─── Configuration ───
-    EPOCHS = 100
-    BATCH_SIZE = 16            # Robust batch size for local memory
+    EPOCHS = 150
+    BATCH_SIZE = 16            # Robust batch size for local GPU memory
     LEARNING_RATE = 3e-4
     WORKING_SR = 16000
-    WINDOW_SIZE = WORKING_SR   # 16000 samples = 1.0 second
-    PATIENCE = 15
+    AUDIO_LENGTH = 16000       # 16000 samples = 1.0 second audio input
+    HAPTIC_LENGTH = 4800       # 4800 samples = 0.3 second haptic target
+    PATIENCE = 20
     
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    processed_dir = PROJECT_ROOT / "data" / "processed"
+    processed_dir = PROJECT_ROOT / "data" / "processed_sliding"
     checkpoint_dir = PROJECT_ROOT / "checkpoints"
     checkpoint_dir.mkdir(exist_ok=True)
 
-    print(f"Starting Training on {device} (Sample Rate: {WORKING_SR} Hz, Window: {WINDOW_SIZE})...")
+    print(f"Starting Controlled Sliding Training on {device}...")
+    print(f"Sample Rate: {WORKING_SR} Hz | Audio Window: {AUDIO_LENGTH} | Haptic Target: {HAPTIC_LENGTH}")
 
     # ─── 1. Load Data ───
-    train_loader, val_loader = get_dataloaders(
+    train_loader, val_loader = get_sliding_dataloaders(
         processed_dir, 
         batch_size=BATCH_SIZE, 
-        window_size=WINDOW_SIZE
+        audio_length=AUDIO_LENGTH,
+        haptic_length=HAPTIC_LENGTH
     )
     
     if train_loader is None or len(train_loader) == 0:
         print("Error: No data available. Make sure preprocessing has finished.")
+        print(f"Expected processed data in: {processed_dir}")
         return
 
     # Dynamic target channels
@@ -48,15 +52,15 @@ def train():
     # ─── 2. Initialize Models & Optimizer ───
     encoder = FrozenAudioEncoder(target_bandwidth=1.5, device=device, input_sr=WORKING_SR)
     
-    decoder = TactileSEANetDecoder(
+    decoder = SlidingTactileDecoder(
         input_dim=128, 
         output_dim=out_channels, 
-        target_length=WINDOW_SIZE
+        target_length=HAPTIC_LENGTH
     ).to(device)
     
     optimizer = torch.optim.AdamW(decoder.parameters(), lr=LEARNING_RATE, betas=(0.5, 0.9))
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=EPOCHS, eta_min=1e-6)
-    criterion = Sound2HapLossV2(sample_rate=WORKING_SR).to(device)
+    criterion = SlidingHapticLoss(sample_rate=WORKING_SR).to(device)
     
     best_val_loss = float('inf')
     patience_counter = 0
@@ -66,7 +70,7 @@ def train():
         decoder.train()
         train_loss = 0.0
         
-        train_bar = tqdm(train_loader, desc=f"Epoch {epoch}/{EPOCHS} [Train]")
+        train_bar = tqdm(train_loader, desc=f"Epoch {epoch}/{EPOCHS} [Train Sliding]")
         for audio, tactile in train_bar:
             audio, tactile = audio.to(device), tactile.to(device)
             
@@ -86,6 +90,7 @@ def train():
             train_bar.set_postfix({
                 'loss': f"{loss.item():.4f}", 
                 'mse': f"{metrics['mse']:.4f}",
+                'stft': f"{metrics['stft_band']:.4f}",
                 'env': f"{metrics['envelope']:.4f}"
             })
             
@@ -95,7 +100,7 @@ def train():
         # ─── 4. Validation Loop ───
         decoder.eval()
         val_loss = 0.0
-        val_bar = tqdm(val_loader, desc=f"Epoch {epoch}/{EPOCHS} [Val]")
+        val_bar = tqdm(val_loader, desc=f"Epoch {epoch}/{EPOCHS} [Val Sliding]")
         
         with torch.no_grad():
             for audio, tactile in val_bar:
@@ -116,16 +121,17 @@ def train():
         if avg_val_loss < best_val_loss:
             best_val_loss = avg_val_loss
             patience_counter = 0
-            save_path = checkpoint_dir / "best_sean_decoder.pt"
+            save_path = checkpoint_dir / "best_sliding_decoder.pt"
             torch.save({
                 'epoch': epoch,
                 'model_state_dict': decoder.state_dict(),
                 'optimizer_state_dict': optimizer.state_dict(),
                 'val_loss': best_val_loss,
                 'working_sr': WORKING_SR,
-                'window_size': WINDOW_SIZE,
+                'audio_length': AUDIO_LENGTH,
+                'haptic_length': HAPTIC_LENGTH,
             }, save_path)
-            print(f"[*] New best model saved to {save_path.name}")
+            print(f"[*] New best model saved to {save_path.name} (Val Loss: {best_val_loss:.4f})")
         else:
             patience_counter += 1
             if patience_counter >= PATIENCE:
@@ -133,4 +139,4 @@ def train():
                 break
 
 if __name__ == "__main__":
-    train()
+    train_sliding()

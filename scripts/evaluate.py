@@ -14,11 +14,10 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.models.encodec_wrapper import FrozenAudioEncoder
-from src.models.decoder import TactileSEANetDecoder
+from src.models.decoder_sliding import SlidingTactileDecoder
 from src.evaluation.metrics import (
     compute_all_metrics, 
-    compute_rms_envelope, 
-    tactile_sensitivity_weighting
+    compute_rms_envelope
 )
 
 CLASS_MAP = {
@@ -33,12 +32,12 @@ CLASS_MAP = {
 }
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Evaluate Sound2Hap Cross-Modal Haptic Synthesis")
-    parser.add_argument("--checkpoint", type=str, default=str(PROJECT_ROOT / "checkpoints" / "best_sean_decoder.pt"),
-                        help="Path to trained decoder checkpoint")
-    parser.add_argument("--processed_dir", type=str, default=str(PROJECT_ROOT / "data" / "processed"),
-                        help="Directory with processed .npy pairs")
-    parser.add_argument("--output_dir", type=str, default=str(PROJECT_ROOT / "evaluation_results"),
+    parser = argparse.ArgumentParser(description="Evaluate Controlled Sliding Cross-Modal Haptic Synthesis")
+    parser.add_argument("--checkpoint", type=str, default=str(PROJECT_ROOT / "checkpoints" / "best_sliding_decoder.pt"),
+                        help="Path to trained sliding decoder checkpoint")
+    parser.add_argument("--processed_dir", type=str, default=str(PROJECT_ROOT / "data" / "processed_sliding"),
+                        help="Directory with processed sliding .npy pairs")
+    parser.add_argument("--output_dir", type=str, default=str(PROJECT_ROOT / "evaluation_results_sliding"),
                         help="Directory to save evaluation reports and plots")
     parser.add_argument("--max_samples", type=int, default=None,
                         help="Maximum samples to evaluate (default: evaluate all)")
@@ -55,24 +54,26 @@ def evaluate():
     ckpt_path = Path(args.checkpoint)
     if not ckpt_path.exists():
         print(f"Error: Checkpoint not found at {ckpt_path}")
+        print("Please train the model first by running scripts/train_sliding.py")
         return
 
     checkpoint = torch.load(ckpt_path, map_location=device, weights_only=False)
     working_sr = checkpoint.get('working_sr', 16000)
-    window_size = checkpoint.get('window_size', 16000)
+    audio_length = checkpoint.get('audio_length', 16000)
+    haptic_length = checkpoint.get('haptic_length', 4800)
     print(f"Loaded checkpoint from {ckpt_path.name} (Epoch {checkpoint.get('epoch', '?')}, Val Loss: {checkpoint.get('val_loss', 0.0):.4f})")
 
     # Discover validation files (reproduce 80/20 split based on seed 42)
     processed_dir = Path(args.processed_dir)
-    audio_files = sorted(list(processed_dir.rglob("*_audio.npy")))
+    audio_files = sorted(list(processed_dir.rglob("*_sliding_audio.npy")))
     pairs = []
     for af in audio_files:
-        tf = af.parent / af.name.replace("_audio.npy", "_tactile.npy")
+        tf = af.parent / af.name.replace("_sliding_audio.npy", "_sliding_tactile.npy")
         if tf.exists():
             pairs.append((af, tf))
             
     if not pairs:
-        print(f"Error: No paired files found in {processed_dir}")
+        print(f"Error: No paired sliding files found in {processed_dir}")
         return
         
     np.random.seed(42)
@@ -88,14 +89,10 @@ def evaluate():
 
     # Load Models
     encoder = FrozenAudioEncoder(target_bandwidth=1.5, device=device, input_sr=working_sr)
-    decoder = TactileSEANetDecoder(input_dim=128, output_dim=1, target_length=window_size).to(device)
+    decoder = SlidingTactileDecoder(input_dim=128, output_dim=1, target_length=haptic_length).to(device)
     
     state_dict = checkpoint['model_state_dict']
-    # If checkpoint had old output_scale parameter, ignore it smoothly
-    if 'output_scale' in state_dict:
-        del state_dict['output_scale']
-        
-    decoder.load_state_dict(state_dict, strict=False)
+    decoder.load_state_dict(state_dict, strict=True)
     decoder.eval()
 
     all_results = []
@@ -106,27 +103,31 @@ def evaluate():
     all_psd_pred = []
     psd_freqs = None
 
-    for i, (aud_path, tac_path) in enumerate(tqdm(val_pairs, desc="Evaluating")):
+    for i, (aud_path, tac_path) in enumerate(tqdm(val_pairs, desc="Evaluating Sliding")):
         # Extract class code from filename e.g. C1_S1...
-        stem = aud_path.stem.replace("_audio", "")
+        stem = aud_path.stem.replace("_sliding_audio", "")
         class_code = stem.split("_")[0] if "_" in stem else "Other"
         
         audio = np.load(aud_path).flatten()
         tactile = np.load(tac_path).flatten()
         
-        min_len = min(len(audio), len(tactile))
-        if min_len > window_size:
-            audio = audio[:window_size]
-            tactile = tactile[:window_size]
+        # Audio length enforcement
+        if len(audio) > audio_length:
+            audio = audio[:audio_length]
         else:
-            audio = np.pad(audio[:min_len], (0, max(0, window_size - min_len)))
-            tactile = np.pad(tactile[:min_len], (0, max(0, window_size - min_len)))
+            audio = np.pad(audio, (0, audio_length - len(audio)))
+            
+        # Tactile length enforcement
+        if len(tactile) > haptic_length:
+            tactile = tactile[:haptic_length]
+        else:
+            tactile = np.pad(tactile, (0, haptic_length - len(tactile)))
             
         # Audio normalized for EnCodec
         audio_norm = audio - audio.mean()
         audio_norm = audio_norm / (np.abs(audio_norm).max() + 1e-8)
         
-        # Tactile is already processed & z-scored; do not re-normalize
+        # Tactile is already processed & z-scored
         audio_t = torch.from_numpy(audio_norm).float().unsqueeze(0).unsqueeze(0).to(device)
         
         with torch.no_grad():
@@ -136,7 +137,7 @@ def evaluate():
         pred = pred_t.squeeze().cpu().numpy()
         gt = tactile
         
-        metrics = compute_all_metrics(pred, gt, sr=working_sr)
+        metrics = compute_all_metrics(pred, gt, sr=working_sr, tactile_low=30.0, tactile_high=800.0)
         metrics['filename'] = aud_path.name
         metrics['class'] = class_code
         metrics['class_name'] = CLASS_MAP.get(class_code, 'Unknown')
@@ -146,7 +147,7 @@ def evaluate():
             class_results[class_code].append(metrics)
             
         # Compute PSD for aggregation
-        nperseg = min(1024, len(pred))
+        nperseg = min(512, len(pred))
         freqs, psd_gt = signal.welch(gt, fs=working_sr, nperseg=nperseg, noverlap=nperseg//2)
         _, psd_p = signal.welch(pred, fs=working_sr, nperseg=nperseg, noverlap=nperseg//2)
         if psd_freqs is None:
@@ -202,7 +203,7 @@ def evaluate():
 
     # ─── 2. Print Summary Table ───
     print("\n" + "="*80)
-    print("                    SOUND2HAP EVALUATION SUMMARY")
+    print("             CONTROLLED SLIDING EVALUATION SUMMARY")
     print("="*80)
     print(f"{'Category':<16} | {'Metric':<28} | {'Mean ± Std':<20} | {'Ideal':<8}")
     print("-" * 80)
@@ -215,9 +216,8 @@ def evaluate():
         ("Time Domain", "RMS Energy Ratio", "rms_ratio", "-> 1.0"),
         ("Time Domain", "Envelope Corr (64)", "env_corr_64", "-> 1.0"),
         ("Time Domain", "Envelope Corr (256)", "env_corr_256", "-> 1.0"),
-        ("Time Domain", "Envelope Corr (1024)", "env_corr_1024", "-> 1.0"),
         ("Spectral", "Log Spectral Dist (LSD dB)", "log_spectral_distance", "-> 0.0"),
-        ("Spectral", "Tactile Band (50-300Hz) LSD", "lsd_tactile_band", "-> 0.0"),
+        ("Spectral", "Tactile Band (30-800Hz) LSD", "lsd_tactile_band", "-> 0.0"),
         ("Spectral", "Tactile Band Energy Ratio", "tactile_band_energy_ratio", "-> 1.0"),
         ("Spectral", "Spectral Convergence", "spectral_convergence", "-> 0.0"),
         ("Spectral", "Spectral Centroid Delta (Hz)", "spectral_centroid_delta_hz", "-> 0.0"),
@@ -228,12 +228,12 @@ def evaluate():
     ]
     
     for cat, name, key, ideal in table_items:
-        m_val = summary[key]['mean']
-        s_val = summary[key]['std']
+        m_val = summary.get(key, {}).get('mean', 0.0)
+        s_val = summary.get(key, {}).get('std', 0.0)
         print(f"{cat:<16} | {name:<28} | {m_val:7.4f} ± {s_val:6.4f}     | {ideal:<8}")
         
     print("\n" + "="*80)
-    print("                    PER-CLASS PERFORMANCE BREAKDOWN")
+    print("             PER-CLASS PERFORMANCE BREAKDOWN (SLIDING)")
     print("="*80)
     print(f"{'Class':<22} | {'Count':<5} | {'PCC':<6} | {'RMSE':<6} | {'SNR(dB)':<7} | {'PeakRatio':<9} | {'TactileLSD':<10} | {'CosSim':<6}")
     print("-" * 80)
@@ -246,6 +246,9 @@ def evaluate():
         'checkpoint': ckpt_path.name,
         'num_samples_evaluated': len(all_results),
         'working_sr': working_sr,
+        'audio_length': audio_length,
+        'haptic_length': haptic_length,
+        'tactile_band': [30.0, 800.0],
         'summary': summary,
         'per_class_summary': per_class_summary,
         'per_sample_results': all_results
@@ -259,19 +262,18 @@ def evaluate():
     fig, axes = plt.subplots(n_plots, 1, figsize=(12, 3.2 * n_plots), sharex=True)
     if n_plots == 1:
         axes = [axes]
-    fig.suptitle("Sound2Hap: Power Spectral Density Comparison (Welch PSD)", fontsize=16)
+    fig.suptitle("Controlled Sliding: Power Spectral Density Comparison (Welch PSD)", fontsize=16)
 
     for idx, (ax, s) in enumerate(zip(axes, sample_plots_data)):
         freqs = s['freqs']
         psd_gt_db = 10.0 * np.log10(np.maximum(s['psd_gt'], 1e-12))
         psd_pred_db = 10.0 * np.log10(np.maximum(s['psd_pred'], 1e-12))
         
-        # Highlight 50-300 Hz tactile band
-        ax.axvspan(50, 300, color='green', alpha=0.15, label='Tactile Band (50-300 Hz)' if idx == 0 else "")
+        # Highlight 30-800 Hz tactile band
+        ax.axvspan(30, 800, color='green', alpha=0.15, label='Tactile Band (30-800 Hz)' if idx == 0 else "")
         ax.plot(freqs, psd_gt_db, color='blue', label='Ground Truth' if idx == 0 else "", alpha=0.85, linewidth=1.5)
         ax.plot(freqs, psd_pred_db, color='orange', label='Predicted' if idx == 0 else "", alpha=0.85, linewidth=1.5)
         
-        # Annotate centroids
         c_gt = s['metrics']['spectral_centroid_gt_hz']
         c_pr = s['metrics']['spectral_centroid_pred_hz']
         ax.axvline(c_gt, color='blue', linestyle='--', alpha=0.6, label='GT Centroid' if idx == 0 else "")
@@ -306,13 +308,13 @@ def evaluate():
     std_pred = np.std(psd_pred_db_all, axis=0)
     
     plt.figure(figsize=(12, 6))
-    plt.axvspan(50, 300, color='green', alpha=0.15, label='Tactile-Sensitive Band (50-300 Hz)')
+    plt.axvspan(30, 800, color='green', alpha=0.15, label='Tactile-Sensitive Band (30-800 Hz)')
     plt.plot(psd_freqs, mean_gt, color='blue', label='Ground Truth (Mean)', linewidth=2)
     plt.fill_between(psd_freqs, mean_gt - std_gt, mean_gt + std_gt, color='blue', alpha=0.2)
     plt.plot(psd_freqs, mean_pred, color='orange', label='Predicted (Mean)', linewidth=2)
     plt.fill_between(psd_freqs, mean_pred - std_pred, mean_pred + std_pred, color='orange', alpha=0.2)
     
-    plt.title(f"Sound2Hap: Aggregate Power Spectral Density (N={len(all_results)} Validation Samples)", fontsize=14)
+    plt.title(f"Controlled Sliding: Aggregate Power Spectral Density (N={len(all_results)} Validation Samples)", fontsize=14)
     plt.xlabel("Frequency (Hz) [Log Scale]", fontsize=12)
     plt.ylabel("Power Spectral Density (dB/Hz)", fontsize=12)
     plt.xscale('log')
@@ -325,18 +327,18 @@ def evaluate():
     print(f"[*] Aggregate PSD plot saved to: {out_dir / 'evaluation_aggregate_psd.png'}")
 
     # ─── 6. Plot 3: Multi-Scale Envelope Comparison ───
-    fig, axes = plt.subplots(n_plots, 3, figsize=(15, 2.5 * n_plots), sharex='col')
+    fig, axes = plt.subplots(n_plots, 2, figsize=(12, 2.5 * n_plots), sharex='col')
     if n_plots == 1:
         axes = [axes]
-    fig.suptitle("Sound2Hap: Multi-Scale RMS Temporal Envelopes (64, 256, 1024 frames)", fontsize=16)
+    fig.suptitle("Controlled Sliding: Multi-Scale RMS Temporal Envelopes (64, 256 frames)", fontsize=16)
 
     for idx, (row_axes, s) in enumerate(zip(axes, sample_plots_data)):
-        for col_idx, fl in enumerate([64, 256, 1024]):
+        for col_idx, fl in enumerate([64, 256]):
             ax = row_axes[col_idx]
-            hl = fl // 2
+            hl = max(1, fl // 2)
             env_gt = compute_rms_envelope(s['gt'], frame_len=fl, hop_len=hl)
             env_pr = compute_rms_envelope(s['pred'], frame_len=fl, hop_len=hl)
-            t_axis = np.linspace(0, 1.0, num=len(env_gt))
+            t_axis = np.linspace(0, haptic_length / working_sr, num=len(env_gt))
             
             ax.plot(t_axis, env_gt, color='blue', label='GT' if idx == 0 else "", alpha=0.85)
             ax.plot(t_axis, env_pr, color='orange', label='Pred' if idx == 0 else "", alpha=0.85)
