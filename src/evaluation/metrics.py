@@ -102,7 +102,8 @@ def compute_time_metrics(pred: np.ndarray, gt: np.ndarray) -> dict:
         **env_corrs
     }
 
-def compute_frequency_metrics(pred: np.ndarray, gt: np.ndarray, sr: int = 16000) -> dict:
+def compute_frequency_metrics(pred: np.ndarray, gt: np.ndarray, sr: int = 16000,
+                             tactile_low: float = 50.0, tactile_high: float = 300.0) -> dict:
     """Computes frequency-domain metrics using Welch's Power Spectral Density."""
     pred = _to_numpy(pred)
     gt = _to_numpy(gt)
@@ -123,8 +124,8 @@ def compute_frequency_metrics(pred: np.ndarray, gt: np.ndarray, sr: int = 16000)
     log_pred = 10.0 * np.log10(psd_pred)
     lsd = float(np.mean(np.abs(log_gt - log_pred)))
     
-    # 2. Tactile band (50 - 300 Hz) LSD
-    tactile_mask = (freqs >= 50.0) & (freqs <= 300.0)
+    # 2. Tactile band LSD
+    tactile_mask = (freqs >= tactile_low) & (freqs <= tactile_high)
     if np.any(tactile_mask):
         lsd_tactile = float(np.mean(np.abs(log_gt[tactile_mask] - log_pred[tactile_mask])))
         trapz_func = getattr(np, 'trapezoid', getattr(np, 'trapz', None))
@@ -204,7 +205,8 @@ def compute_perceptual_metrics(pred: np.ndarray, gt: np.ndarray, sr: int = 16000
         'spqi_lite': spqi_lite,
     }
 
-def compute_all_metrics(pred, gt, sr: int = 16000) -> dict:
+def compute_all_metrics(pred, gt, sr: int = 16000,
+                        tactile_low: float = 50.0, tactile_high: float = 300.0) -> dict:
     """
     Computes all time-domain, frequency-domain, and perceptual metrics.
     Accepts 1D numpy arrays or PyTorch tensors.
@@ -213,7 +215,9 @@ def compute_all_metrics(pred, gt, sr: int = 16000) -> dict:
     gt_np = _to_numpy(gt)
     
     time_m = compute_time_metrics(pred_np, gt_np)
-    freq_m = compute_frequency_metrics(pred_np, gt_np, sr=sr)
+    freq_m = compute_frequency_metrics(pred_np, gt_np, sr=sr,
+                                      tactile_low=tactile_low,
+                                      tactile_high=tactile_high)
     perc_m = compute_perceptual_metrics(pred_np, gt_np, sr=sr)
     
     return {**time_m, **freq_m, **perc_m}

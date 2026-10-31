@@ -7,6 +7,18 @@ wheels/
 *.egg-info
 
 # Virtual environments
-.venv
+.venv/
+env/
+venv/
 
-data/
+# Large dataset directory (root data directory only)
+/data/
+
+# Agent / Scratch / Diagnostic scripts
+extract_and_inspect.py
+scripts/check_keys.py
+scripts/run_preprocessing_v2.py
+scripts/test_*.py
+scratch/
+*.tmp
+temp/

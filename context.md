@@ -173,4 +173,13 @@ soundTap (44100 Hz, 5.0s)
 - [x] Full dataset architecture & physical parameters analyzed
 - [x] Conceptual disambiguation: Controlled vs Uncontrolled vs Tap vs Sliding clarified
 - [x] Controlled Tap Synthesis Phase: Validated & Finalized as solid baseline
-- [ ] Phase 2: Continuous Sliding Texture Synthesis (`sound` -> `accelDFT`) or Multimodal Expansion (TexTUM Vision + Audio)
+- [x] Phase 2 Implementation: Continuous Sliding Texture Synthesis (`sound` -> `accelDFT`)
+  - [x] Sliding preprocessor implemented (`src/data/preprocess_sliding.py` & `scripts/run_preprocessing_sliding.py`)
+  - [x] Sliding dataset & dataloaders implemented (`src/data/dataset_sliding.py`)
+  - [x] Sliding decoder with temporal compression implemented (`src/models/decoder_sliding.py`)
+  - [x] Texture-tuned composite loss implemented (`src/models/loss_sliding.py`)
+  - [x] Sliding training runner created (`scripts/train_sliding.py`)
+  - [x] Sliding inference script created (`scripts/inference_sliding.py`)
+  - [x] Sliding evaluation runner created (`scripts/evaluate_sliding.py`)
+  - [x] Parameterized tactile band evaluation metrics (`src/evaluation/metrics.py`)
+- [ ] Phase 2 Execution: Run preprocessing, train model, and evaluate validation results
