@@ -116,12 +116,13 @@ def compute_frequency_metrics(pred: np.ndarray, gt: np.ndarray, sr: int = 16000,
     freqs, psd_gt = signal.welch(gt, fs=sr, nperseg=nperseg, noverlap=nperseg//2)
     _, psd_pred = signal.welch(pred, fs=sr, nperseg=nperseg, noverlap=nperseg//2)
     
-    psd_gt = np.maximum(psd_gt, 1e-12)
-    psd_pred = np.maximum(psd_pred, 1e-12)
+    # Clamp PSD dynamic range floor to -60 dB (1e-6) relative to peak to prevent stopband log blowup
+    p_gt_floor = np.maximum(psd_gt, np.max(psd_gt) * 1e-6 + 1e-12)
+    p_pred_floor = np.maximum(psd_pred, np.max(psd_pred) * 1e-6 + 1e-12)
     
     # 1. Log Spectral Distance (LSD) across spectrum (in dB)
-    log_gt = 10.0 * np.log10(psd_gt)
-    log_pred = 10.0 * np.log10(psd_pred)
+    log_gt = 10.0 * np.log10(p_gt_floor)
+    log_pred = 10.0 * np.log10(p_pred_floor)
     lsd = float(np.mean(np.abs(log_gt - log_pred)))
     
     # 2. Tactile band LSD
@@ -195,9 +196,11 @@ def compute_perceptual_metrics(pred: np.ndarray, gt: np.ndarray, sr: int = 16000
     weighted_diff = weights * (psd_pred - psd_gt)
     freq_weighted_mse = float(np.mean(weighted_diff ** 2))
     
-    # SPQI-Lite: Psychophysically weighted log spectral distance
-    log_gt = 10.0 * np.log10(np.maximum(psd_gt, 1e-12))
-    log_pred = 10.0 * np.log10(np.maximum(psd_pred, 1e-12))
+    # SPQI-Lite: Psychophysically weighted log spectral distance with floor clamping
+    p_gt_floor = np.maximum(psd_gt, np.max(psd_gt) * 1e-6 + 1e-12)
+    p_pred_floor = np.maximum(psd_pred, np.max(psd_pred) * 1e-6 + 1e-12)
+    log_gt = 10.0 * np.log10(p_gt_floor)
+    log_pred = 10.0 * np.log10(p_pred_floor)
     spqi_lite = float(np.sum(weights * np.abs(log_gt - log_pred)) / (np.sum(weights) + 1e-8))
     
     return {

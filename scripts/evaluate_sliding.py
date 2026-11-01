@@ -13,8 +13,9 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from src.data.dataset_sliding import discover_sliding_pairs, get_stratified_split_indices
 from src.models.encodec_wrapper import FrozenAudioEncoder
-from src.models.decoder_sliding import SlidingTactileDecoder
+from src.models.decoder_sliding import SlidingSEANetDecoder, SlidingTactileDecoder
 from src.evaluation.metrics import (
     compute_all_metrics, 
     compute_rms_envelope
@@ -63,33 +64,30 @@ def evaluate():
     haptic_length = checkpoint.get('haptic_length', 4800)
     print(f"Loaded checkpoint from {ckpt_path.name} (Epoch {checkpoint.get('epoch', '?')}, Val Loss: {checkpoint.get('val_loss', 0.0):.4f})")
 
-    # Discover validation files (reproduce 80/20 split based on seed 42)
+    # Discover validation files using deterministic stratified split (seed 42)
     processed_dir = Path(args.processed_dir)
-    audio_files = sorted(list(processed_dir.rglob("*_sliding_audio.npy")))
-    pairs = []
-    for af in audio_files:
-        tf = af.parent / af.name.replace("_sliding_audio.npy", "_sliding_tactile.npy")
-        if tf.exists():
-            pairs.append((af, tf))
+    all_pairs = discover_sliding_pairs(processed_dir)
             
-    if not pairs:
+    if not all_pairs:
         print(f"Error: No paired sliding files found in {processed_dir}")
         return
         
-    np.random.seed(42)
-    indices = np.random.permutation(len(pairs))
-    train_size = int(0.8 * len(pairs))
-    val_indices = indices[train_size:]
-    val_pairs = [pairs[i] for i in val_indices]
+    _, val_indices = get_stratified_split_indices(all_pairs, train_ratio=0.8, seed=42)
+    val_pairs = [all_pairs[i] for i in val_indices]
     
     if args.max_samples:
         val_pairs = val_pairs[:args.max_samples]
         
-    print(f"Evaluating {len(val_pairs)} validation samples on device: {device}...")
+    print(f"Evaluating {len(val_pairs)} stratified validation samples on device: {device}...")
 
     # Load Models
     encoder = FrozenAudioEncoder(target_bandwidth=1.5, device=device, input_sr=working_sr)
-    decoder = SlidingTactileDecoder(input_dim=128, output_dim=1, target_length=haptic_length).to(device)
+    decoder = SlidingSEANetDecoder(
+        latent_dim=128, 
+        output_dim=1, 
+        target_length=haptic_length,
+        num_tactile_bands=40
+    ).to(device)
     
     state_dict = checkpoint['model_state_dict']
     decoder.load_state_dict(state_dict, strict=True)
@@ -105,7 +103,7 @@ def evaluate():
 
     for i, (aud_path, tac_path) in enumerate(tqdm(val_pairs, desc="Evaluating Sliding")):
         # Extract class code from filename e.g. C1_S1...
-        stem = aud_path.stem.replace("_sliding_audio", "")
+        stem = aud_path.name.replace("_sliding_audio.npy", "")
         class_code = stem.split("_")[0] if "_" in stem else "Other"
         
         audio = np.load(aud_path).flatten()
@@ -127,12 +125,12 @@ def evaluate():
         audio_norm = audio - audio.mean()
         audio_norm = audio_norm / (np.abs(audio_norm).max() + 1e-8)
         
-        # Tactile is already processed & z-scored
+        # Tactile is already processed & normalized
         audio_t = torch.from_numpy(audio_norm).float().unsqueeze(0).unsqueeze(0).to(device)
         
         with torch.no_grad():
             latent = encoder(audio_t)
-            pred_t = decoder(latent)
+            pred_t = decoder(latent, audio=audio_t)
             
         pred = pred_t.squeeze().cpu().numpy()
         gt = tactile
@@ -203,7 +201,7 @@ def evaluate():
 
     # ─── 2. Print Summary Table ───
     print("\n" + "="*80)
-    print("             CONTROLLED SLIDING EVALUATION SUMMARY")
+    print("             CONTROLLED SLIDING EVALUATION SUMMARY (Phase 2.3)")
     print("="*80)
     print(f"{'Category':<16} | {'Metric':<28} | {'Mean ± Std':<20} | {'Ideal':<8}")
     print("-" * 80)
@@ -216,6 +214,7 @@ def evaluate():
         ("Time Domain", "RMS Energy Ratio", "rms_ratio", "-> 1.0"),
         ("Time Domain", "Envelope Corr (64)", "env_corr_64", "-> 1.0"),
         ("Time Domain", "Envelope Corr (256)", "env_corr_256", "-> 1.0"),
+        ("Time Domain", "Envelope Corr (1024)", "env_corr_1024", "-> 1.0"),
         ("Spectral", "Log Spectral Dist (LSD dB)", "log_spectral_distance", "-> 0.0"),
         ("Spectral", "Tactile Band (30-800Hz) LSD", "lsd_tactile_band", "-> 0.0"),
         ("Spectral", "Tactile Band Energy Ratio", "tactile_band_energy_ratio", "-> 1.0"),
@@ -262,7 +261,7 @@ def evaluate():
     fig, axes = plt.subplots(n_plots, 1, figsize=(12, 3.2 * n_plots), sharex=True)
     if n_plots == 1:
         axes = [axes]
-    fig.suptitle("Controlled Sliding: Power Spectral Density Comparison (Welch PSD)", fontsize=16)
+    fig.suptitle("Controlled Sliding: Power Spectral Density Comparison (Phase 2.3 Acoustic-Guided)", fontsize=16)
 
     for idx, (ax, s) in enumerate(zip(axes, sample_plots_data)):
         freqs = s['freqs']
@@ -299,6 +298,7 @@ def evaluate():
     all_psd_gt = np.array(all_psd_gt)
     all_psd_pred = np.array(all_psd_pred)
     
+    psd_freqs_arr = np.array(psd_freqs) if psd_freqs is not None else np.linspace(0, 8000, 257)
     psd_gt_db_all = 10.0 * np.log10(np.maximum(all_psd_gt, 1e-12))
     psd_pred_db_all = 10.0 * np.log10(np.maximum(all_psd_pred, 1e-12))
     
@@ -309,10 +309,10 @@ def evaluate():
     
     plt.figure(figsize=(12, 6))
     plt.axvspan(30, 800, color='green', alpha=0.15, label='Tactile-Sensitive Band (30-800 Hz)')
-    plt.plot(psd_freqs, mean_gt, color='blue', label='Ground Truth (Mean)', linewidth=2)
-    plt.fill_between(psd_freqs, mean_gt - std_gt, mean_gt + std_gt, color='blue', alpha=0.2)
-    plt.plot(psd_freqs, mean_pred, color='orange', label='Predicted (Mean)', linewidth=2)
-    plt.fill_between(psd_freqs, mean_pred - std_pred, mean_pred + std_pred, color='orange', alpha=0.2)
+    plt.plot(psd_freqs_arr, mean_gt, color='blue', label='Ground Truth (Mean)', linewidth=2)
+    plt.fill_between(psd_freqs_arr, mean_gt - std_gt, mean_gt + std_gt, color='blue', alpha=0.2)
+    plt.plot(psd_freqs_arr, mean_pred, color='orange', label='Predicted (Mean)', linewidth=2)
+    plt.fill_between(psd_freqs_arr, mean_pred - std_pred, mean_pred + std_pred, color='orange', alpha=0.2)
     
     plt.title(f"Controlled Sliding: Aggregate Power Spectral Density (N={len(all_results)} Validation Samples)", fontsize=14)
     plt.xlabel("Frequency (Hz) [Log Scale]", fontsize=12)

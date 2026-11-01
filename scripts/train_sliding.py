@@ -11,33 +11,36 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from src.data.dataset_sliding import get_sliding_dataloaders
 from src.models.encodec_wrapper import FrozenAudioEncoder
-from src.models.decoder_sliding import SlidingTactileDecoder
-from src.models.loss_sliding import SlidingHapticLoss
+from src.models.decoder_sliding import SlidingSEANetDecoder, SlidingTactileDecoder
+from src.models.loss_sliding import SlidingTextureLoss, SlidingHapticLoss
 
 def train_sliding():
     # ─── Configuration ───
     EPOCHS = 150
     BATCH_SIZE = 16            # Robust batch size for local GPU memory
     LEARNING_RATE = 3e-4
+    WEIGHT_DECAY = 1e-4
     WORKING_SR = 16000
-    AUDIO_LENGTH = 16000       # 16000 samples = 1.0 second audio input
+    AUDIO_LENGTH = 16000       # 16000 samples = 1.0 second audio input (aligned 0.3s is in [:4800])
     HAPTIC_LENGTH = 4800       # 4800 samples = 0.3 second haptic target
-    PATIENCE = 20
+    PATIENCE = 40              # Extended patience for Phase 2.3 fine-tuning
     
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     processed_dir = PROJECT_ROOT / "data" / "processed_sliding"
     checkpoint_dir = PROJECT_ROOT / "checkpoints"
     checkpoint_dir.mkdir(exist_ok=True)
 
-    print(f"Starting Controlled Sliding Training on {device}...")
-    print(f"Sample Rate: {WORKING_SR} Hz | Audio Window: {AUDIO_LENGTH} | Haptic Target: {HAPTIC_LENGTH}")
+    print(f"Starting Controlled Sliding Training (Phase 2.3 Acoustic-Guided Overhaul) on {device}...")
+    print(f"Sample Rate: {WORKING_SR} Hz | Audio Window: {AUDIO_LENGTH} | Haptic Target: {HAPTIC_LENGTH} | Patience: {PATIENCE}")
 
-    # ─── 1. Load Data ───
+    # ─── 1. Load Data (Stratified Split) ───
     train_loader, val_loader = get_sliding_dataloaders(
         processed_dir, 
         batch_size=BATCH_SIZE, 
         audio_length=AUDIO_LENGTH,
-        haptic_length=HAPTIC_LENGTH
+        haptic_length=HAPTIC_LENGTH,
+        train_ratio=0.8,
+        seed=42,
     )
     
     if train_loader is None or len(train_loader) == 0:
@@ -52,15 +55,16 @@ def train_sliding():
     # ─── 2. Initialize Models & Optimizer ───
     encoder = FrozenAudioEncoder(target_bandwidth=1.5, device=device, input_sr=WORKING_SR)
     
-    decoder = SlidingTactileDecoder(
-        input_dim=128, 
+    decoder = SlidingSEANetDecoder(
+        latent_dim=128, 
         output_dim=out_channels, 
-        target_length=HAPTIC_LENGTH
+        target_length=HAPTIC_LENGTH,
+        num_tactile_bands=40,
     ).to(device)
     
-    optimizer = torch.optim.AdamW(decoder.parameters(), lr=LEARNING_RATE, betas=(0.5, 0.9))
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=EPOCHS, eta_min=1e-6)
-    criterion = SlidingHapticLoss(sample_rate=WORKING_SR).to(device)
+    optimizer = torch.optim.AdamW(decoder.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=EPOCHS, eta_min=1e-5)
+    criterion = SlidingTextureLoss(sr=WORKING_SR).to(device)
     
     best_val_loss = float('inf')
     patience_counter = 0
@@ -78,20 +82,21 @@ def train_sliding():
             
             with torch.no_grad():
                 latent_embeddings = encoder(audio)
-            predicted_tactile = decoder(latent_embeddings)
+            predicted_tactile = decoder(latent_embeddings, audio=audio)
             
-            loss, metrics = criterion(predicted_tactile, tactile)
+            loss, metrics = criterion(predicted_tactile, tactile, return_components=True)
             
             loss.backward()
-            torch.nn.utils.clip_grad_norm_(decoder.parameters(), max_norm=1.0)
+            torch.nn.utils.clip_grad_norm_(decoder.parameters(), max_norm=2.0)
             optimizer.step()
             
             train_loss += loss.item()
             train_bar.set_postfix({
-                'loss': f"{loss.item():.4f}", 
-                'mse': f"{metrics['mse']:.4f}",
-                'stft': f"{metrics['stft_band']:.4f}",
-                'env': f"{metrics['envelope']:.4f}"
+                'loss': f"{loss.item():.3f}", 
+                'psd': f"{metrics.get('psd', 0.0):.3f}",
+                'cent': f"{metrics.get('cent', metrics.get('centroid', 0.0)):.3f}",
+                'env': f"{metrics.get('env', 0.0):.3f}",
+                'stat': f"{metrics.get('stat', 0.0):.3f}",
             })
             
         avg_train_loss = train_loss / len(train_loader)
@@ -107,11 +112,11 @@ def train_sliding():
                 audio, tactile = audio.to(device), tactile.to(device)
                 
                 latent_embeddings = encoder(audio)
-                predicted_tactile = decoder(latent_embeddings)
+                predicted_tactile = decoder(latent_embeddings, audio=audio)
                 
-                loss, _ = criterion(predicted_tactile, tactile)
+                loss, _ = criterion(predicted_tactile, tactile, return_components=True)
                 val_loss += loss.item()
-                val_bar.set_postfix({'loss': f"{loss.item():.4f}"})
+                val_bar.set_postfix({'val_loss': f"{loss.item():.3f}"})
                 
         avg_val_loss = val_loss / len(val_loader)
         

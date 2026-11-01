@@ -13,7 +13,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from src.data.dataset_sliding import get_sliding_dataloaders
 from src.models.encodec_wrapper import FrozenAudioEncoder
-from src.models.decoder_sliding import SlidingTactileDecoder
+from src.models.decoder_sliding import SlidingSEANetDecoder, SlidingTactileDecoder
 from src.evaluation.metrics import compute_all_metrics
 
 def run_inference_sliding():
@@ -35,7 +35,8 @@ def run_inference_sliding():
     _, val_loader = get_sliding_dataloaders(
         processed_dir, batch_size=1, 
         audio_length=audio_length, 
-        haptic_length=haptic_length
+        haptic_length=haptic_length,
+        seed=42,
     )
     if val_loader is None or len(val_loader) == 0:
         print("Error: No validation data available.")
@@ -49,7 +50,12 @@ def run_inference_sliding():
 
     print("2. Initializing Models and Loading Weights...")
     encoder = FrozenAudioEncoder(target_bandwidth=1.5, device=device, input_sr=working_sr)
-    decoder = SlidingTactileDecoder(input_dim=128, output_dim=out_channels, target_length=haptic_length).to(device)
+    decoder = SlidingSEANetDecoder(
+        latent_dim=128, 
+        output_dim=out_channels, 
+        target_length=haptic_length,
+        num_tactile_bands=40
+    ).to(device)
     
     state_dict = checkpoint['model_state_dict']
     decoder.load_state_dict(state_dict, strict=True)
@@ -58,7 +64,7 @@ def run_inference_sliding():
     print("3. Generating Sliding Tactile Waveform...")
     with torch.no_grad():
         latent_embeddings = encoder(audio_tensor)
-        predicted_tactile_tensor = decoder(latent_embeddings)
+        predicted_tactile_tensor = decoder(latent_embeddings, audio=audio_tensor)
 
     audio_np = audio_tensor.squeeze().cpu().numpy()
     true_tactile_np = true_tactile_tensor.squeeze().cpu().numpy()
@@ -79,7 +85,7 @@ def run_inference_sliding():
                                        tactile_low=30.0, tactile_high=800.0)
 
     print("\n" + "="*60)
-    print("       CONTROLLED SLIDING INFERENCE EVALUATION")
+    print("       CONTROLLED SLIDING INFERENCE EVALUATION (Phase 2.3)")
     print("="*60)
     print(f"Pearson Correlation (PCC): {raw_metrics['pearson_correlation']:.4f} (Filtered: {filt_metrics['pearson_correlation']:.4f})")
     print(f"RMSE:                     {raw_metrics['rmse']:.4f} (Filtered: {filt_metrics['rmse']:.4f})")
@@ -89,7 +95,9 @@ def run_inference_sliding():
     print(f"Tactile Band (30-800Hz) LSD: {raw_metrics['lsd_tactile_band']:.2f} dB")
     print(f"Tactile Energy Ratio:     {raw_metrics['tactile_band_energy_ratio']:.3f}x")
     print(f"PSD Cosine Similarity:    {raw_metrics['psd_cosine_similarity']:.4f}")
-    print(f"Envelope Corr (128):      {raw_metrics.get('env_corr_128', raw_metrics.get('env_corr_256', 0.0)):.4f}")
+    print(f"Envelope Corr (256):      {raw_metrics.get('env_corr_256', 0.0):.4f}")
+    print(f"Envelope Corr (1024):     {raw_metrics.get('env_corr_1024', 0.0):.4f}")
+    print(f"Spectral Centroid Delta:  {raw_metrics['spectral_centroid_delta_hz']:.1f} Hz (GT: {raw_metrics['spectral_centroid_gt_hz']:.1f} Hz, Pred: {raw_metrics['spectral_centroid_pred_hz']:.1f} Hz)")
     print(f"SPQI-Lite:                {raw_metrics['spqi_lite']:.3f}")
     print("="*60 + "\n")
 
@@ -99,25 +107,25 @@ def run_inference_sliding():
     print("4. Plotting Results...")
     fig, axes = plt.subplots(4, 1, figsize=(13, 11))
     title_str = (
-        f"Controlled Sliding: Audio-to-Haptic Cross-Modal Synthesis\n"
-        f"PCC: {raw_metrics['pearson_correlation']:.3f} | Peak Ratio: {raw_metrics['peak_amplitude_ratio']:.2f}x | "
-        f"SNR: {raw_metrics['snr_db']:.1f} dB | Tactile LSD: {raw_metrics['lsd_tactile_band']:.1f} dB | "
-        f"PSD CosSim: {raw_metrics['psd_cosine_similarity']:.3f}"
+        f"Controlled Sliding (Phase 2.3): Audio-to-Haptic Cross-Modal Synthesis\n"
+        f"Tactile LSD: {raw_metrics['lsd_tactile_band']:.1f} dB | PSD CosSim: {raw_metrics['psd_cosine_similarity']:.3f} | "
+        f"Peak Ratio: {raw_metrics['peak_amplitude_ratio']:.2f}x | RMS Ratio: {raw_metrics['rms_ratio']:.2f}x | "
+        f"Centroid Delta: {raw_metrics['spectral_centroid_delta_hz']:.1f} Hz"
     )
     fig.suptitle(title_str, fontsize=13)
 
     axes[0].plot(audio_time, audio_np, color='gray', alpha=0.8)
-    axes[0].set_title(f"Input Sliding Audio Modality (sound @ 16kHz, Duration: {audio_length/working_sr:.1f}s)")
+    axes[0].set_title(f"Input Sliding Audio Modality (sound @ 16kHz, Duration: {audio_length/working_sr:.1f}s, Aligned 0.3s window in [:4800])")
     axes[0].set_ylabel("Amplitude")
     axes[0].set_xlabel("Time (Seconds)")
 
     axes[1].plot(haptic_time, true_tactile_np, color='blue', alpha=0.8)
-    axes[1].set_title(f"Ground Truth accelDFT Tactile Vibration (0.3s, Peak: {raw_metrics['peak_gt']:.2f}, RMS: {raw_metrics['rms_gt']:.2f})")
+    axes[1].set_title(f"Ground Truth accelDFT Tactile Vibration (0.3s, Peak: {raw_metrics['peak_gt']:.2f}, RMS: {raw_metrics['rms_gt']:.2f}, Centroid: {raw_metrics['spectral_centroid_gt_hz']:.1f} Hz)")
     axes[1].set_ylabel("Norm G-Force")
     axes[1].set_xlabel("Time (Seconds)")
 
     axes[2].plot(haptic_time, pred_tactile_np, color='orange', alpha=0.8)
-    axes[2].set_title(f"Model Predicted Sliding Tactile - Raw Output (Peak: {raw_metrics['peak_pred']:.2f}, RMS: {raw_metrics['rms_pred']:.2f})")
+    axes[2].set_title(f"Model Predicted Sliding Tactile - Raw Output (Peak: {raw_metrics['peak_pred']:.2f}, RMS: {raw_metrics['rms_pred']:.2f}, Centroid: {raw_metrics['spectral_centroid_pred_hz']:.1f} Hz)")
     axes[2].set_ylabel("Norm G-Force")
     axes[2].set_xlabel("Time (Seconds)")
 
