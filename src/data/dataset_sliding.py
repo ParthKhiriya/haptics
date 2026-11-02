@@ -56,13 +56,14 @@ class LMTSlidingDataset(Dataset):
         tactile = np.asarray(tactile, dtype=np.float32)
 
         # Subtle JND-safe haptic/audio co-augmentation during training
+        # Synchronously applied to preserve 1-sample phase, polarity, and gain relationships
         if self.is_train:
             # 1. Random polarity flip (p=0.5) applied identically to both modalities
             if np.random.rand() < 0.5:
                 audio = -audio
                 tactile = -tactile
-            # 2. Small amplitude jitter ~ U(0.92, 1.08) applied identically
-            scale = np.random.uniform(0.92, 1.08)
+            # 2. Small amplitude jitter ~ U(0.95, 1.05) applied identically
+            scale = np.random.uniform(0.95, 1.05)
             audio = np.clip(audio * scale, -1.0, 1.0)
             tactile = tactile * scale
 

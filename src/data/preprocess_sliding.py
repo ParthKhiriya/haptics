@@ -42,6 +42,10 @@ class SlidingPreprocessor:
         self.sos_audio_high = signal.butter(
             4, [800.0, 6000.0], btype="bandpass", fs=self.working_sr, output="sos"
         )
+        # Phase 2.4: Low macro-roughness band (30-350 Hz) for robust alignment & phase locking
+        self.sos_align_low = signal.butter(
+            4, [30.0, 350.0], btype="bandpass", fs=self.working_sr, output="sos"
+        )
 
     @staticmethod
     def _rms_env(x: np.ndarray, win: int) -> np.ndarray:
@@ -52,63 +56,85 @@ class SlidingPreprocessor:
     def _zscore(x: np.ndarray) -> np.ndarray:
         return (x - np.mean(x)) / (np.std(x) + 1e-8)
 
+    @staticmethod
+    def _fast_sliding_pcc(x_long: np.ndarray, y_short: np.ndarray, min_start: int, max_start: int) -> np.ndarray:
+        """
+        Computes exact Pearson correlation between y_short (length M) and every 1-sample slice
+        x_long[s : s + M] for s in [min_start, max_start] in O(N log N) using FFT cross-correlation.
+        """
+        M = len(y_short)
+        y_zm = y_short.astype(np.float64) - np.mean(y_short, dtype=np.float64)
+        y_norm = np.linalg.norm(y_zm)
+        if y_norm < 1e-8:
+            return np.zeros(max_start - min_start + 1, dtype=np.float64)
+        y_unit = y_zm / y_norm
+
+        x_f = x_long.astype(np.float64)
+        # Cross-correlation <x[s:s+M], y_unit> for all valid s
+        cross = signal.correlate(x_f, y_unit, mode="valid", method="fft")[min_start : max_start + 1]
+
+        # Exact sliding window mean and variance of x_f via cumulative sums
+        cs1 = np.concatenate(([0.0], np.cumsum(x_f)))
+        cs2 = np.concatenate(([0.0], np.cumsum(x_f * x_f)))
+        s_idx = np.arange(min_start, max_start + 1)
+        win_sum = cs1[s_idx + M] - cs1[s_idx]
+        win_sq_sum = cs2[s_idx + M] - cs2[s_idx]
+        win_var = np.maximum(win_sq_sum - (win_sum * win_sum) / M, 1e-12)
+        return cross / np.sqrt(win_var)
+
     def _align_audio_window(
         self, audio_1s: np.ndarray, haptic_03s: np.ndarray
-    ) -> tuple[np.ndarray, np.ndarray]:
+    ) -> tuple[np.ndarray, float]:
         """
-        Aligns the 0.3s (4800-sample) haptic vibration against the 1.0s (16000-sample) audio
-        using multi-scale (win=64 and win=256) dual-band (30-800Hz + 800-6000Hz) envelope
-        cross-correlation at a fine 32-sample (2ms) step.
+        Band-Matched Vectorized 1-Sample Resolution Audio-Haptic Alignment:
+        1. Filters audio_1s to the exact tactile passband (30-800 Hz) and low macro-roughness band (30-350 Hz)
+           so high-frequency (1-7 kHz) air-hiss does not corrupt envelope or phase matching.
+        2. Evaluates EVERY 1-sample offset in [0.06s, 0.66s] simultaneously via FFT cross-correlation across:
+           - 64-sample (4ms), 256-sample (16ms), and 1024-sample (64ms) RMS envelopes
+           - 30-800 Hz and 30-350 Hz waveform phase correlations (with optimal accelerometer polarity sign).
         """
-        audio_low = signal.sosfiltfilt(self.sos_audio_low, audio_1s, padtype="odd", padlen=min(512, len(audio_1s) - 1))
-        audio_high = signal.sosfiltfilt(self.sos_audio_high, audio_1s, padtype="odd", padlen=min(512, len(audio_1s) - 1))
+        min_start = int(0.06 * self.working_sr)  # 960
+        max_start = self.audio_len - self.haptic_len - int(0.04 * self.working_sr)  # 10560
 
-        # Multi-scale target envelopes
-        env_h_256 = self._zscore(self._rms_env(haptic_03s, 256))
-        env_h_64 = self._zscore(self._rms_env(haptic_03s, 64))
+        a_f64 = audio_1s.astype(np.float64)
+        h_f64 = haptic_03s.astype(np.float64)
 
-        # Dual-band audio envelopes
-        env_al_256 = self._rms_env(audio_low, 256)
-        env_ah_256 = self._rms_env(audio_high, 256)
-        env_al_64 = self._rms_env(audio_low, 64)
-        env_ah_64 = self._rms_env(audio_high, 64)
+        # Bandpass audio to tactile band (30-800 Hz) and macro-roughness band (30-350 Hz)
+        a_tac = signal.sosfiltfilt(self.sos_haptic, a_f64, padtype="odd", padlen=min(900, len(a_f64) - 1))
+        a_low = signal.sosfiltfilt(self.sos_align_low, a_f64, padtype="odd", padlen=min(900, len(a_f64) - 1))
+        h_low = signal.sosfiltfilt(self.sos_align_low, h_f64, padtype="odd", padlen=min(900, len(h_f64) - 1))
 
-        min_start = int(0.05 * self.working_sr)
-        max_start = self.audio_len - self.haptic_len - int(0.05 * self.working_sr)
-        stride = 32  # 2ms fine resolution
+        # Mix 75% tactile-band power + 25% broadband power for physical envelope extraction
+        a_pow = 0.75 * (a_tac / (np.std(a_tac) + 1e-8)) ** 2 + 0.25 * (a_f64 / (np.std(a_f64) + 1e-8)) ** 2
+        h_pow = h_f64 ** 2
 
-        best_score = -10.0
-        best_start = int(0.35 * self.working_sr)
+        def _rms_env(pow_sig: np.ndarray, win: int) -> np.ndarray:
+            kernel = np.ones(win, dtype=np.float64) / float(win)
+            return np.sqrt(np.convolve(pow_sig, kernel, mode="same") + 1e-10)
 
-        for start in range(min_start, max_start + 1, stride):
-            end = start + self.haptic_len
-            al256 = self._zscore(env_al_256[start:end])
-            ah256 = self._zscore(env_ah_256[start:end])
-            al64 = self._zscore(env_al_64[start:end])
-            ah64 = self._zscore(env_ah_64[start:end])
+        c_env64 = self._fast_sliding_pcc(_rms_env(a_pow, 64), _rms_env(h_pow, 64), min_start, max_start)
+        c_env256 = self._fast_sliding_pcc(_rms_env(a_pow, 256), _rms_env(h_pow, 256), min_start, max_start)
+        c_env1024 = self._fast_sliding_pcc(_rms_env(a_pow, 1024), _rms_env(h_pow, 1024), min_start, max_start)
 
-            comb256 = 0.65 * al256 + 0.35 * ah256
-            comb64 = 0.65 * al64 + 0.35 * ah64
+        c_wave_tac = self._fast_sliding_pcc(a_tac, h_f64, min_start, max_start)
+        c_wave_low = self._fast_sliding_pcc(a_low, h_low, min_start, max_start)
+        c_wave = 0.55 * c_wave_low + 0.45 * c_wave_tac
 
-            c256 = np.mean(comb256 * env_h_256)
-            c64 = np.mean(comb64 * env_h_64)
-            score = 0.6 * c256 + 0.4 * c64
-
-            if score > best_score:
-                best_score = score
-                best_start = start
+        # Joint multi-scale envelope + phase score at 1-sample resolution
+        total_score = (
+            0.32 * c_env64
+            + 0.30 * c_env256
+            + 0.14 * c_env1024
+            + 0.24 * np.abs(c_wave)
+        )
+        best_idx = int(np.argmax(total_score))
+        best_start = min_start + best_idx
+        best_polarity = 1.0 if c_wave[best_idx] >= 0.0 else -1.0
 
         aligned_03s = audio_1s[best_start : best_start + self.haptic_len].copy()
-        aligned_low = audio_low[best_start : best_start + self.haptic_len]
-
-        # Align waveform polarity if low-band acoustic vibration is inverted relative to accelerometer
-        if np.sum(aligned_low * haptic_03s) < 0:
-            aligned_03s = -aligned_03s
-            audio_1s = -audio_1s
-
         remaining = np.concatenate([audio_1s[:best_start], audio_1s[best_start + self.haptic_len :]])
         audio_reordered = np.concatenate([aligned_03s, remaining])[: self.audio_len]
-        return audio_reordered.astype(np.float32), haptic_03s.astype(np.float32)
+        return audio_reordered.astype(np.float32), float(best_polarity)
 
     def _extract_struct_array(self, mat: dict, keys: tuple) -> np.ndarray | None:
         # Check top-level dictionary first, then nested 'finalMaterialRecording' struct
@@ -189,8 +215,9 @@ class SlidingPreprocessor:
         rms_post = np.sqrt(np.mean(haptic_norm ** 2)) + 1e-8
         haptic_norm = np.clip(haptic_norm / rms_post, -5.0, 5.0).astype(np.float32)
 
-        # 3. Align 0.3s audio window to 0.3s haptic envelope
-        audio_aligned, haptic_final = self._align_audio_window(audio_norm, haptic_norm)
+        # 3. Align 0.3s audio window to 0.3s haptic envelope & lock phase polarity
+        audio_aligned, polarity = self._align_audio_window(audio_norm, haptic_norm)
+        haptic_final = (haptic_norm * polarity).astype(np.float32)
 
         # Save audio and both naming variants of haptic for seamless backwards compatibility
         np.save(self.processed_dir / f"{stem}_sliding_audio.npy", audio_aligned)
@@ -206,7 +233,7 @@ class SlidingPreprocessor:
         mat_files = sorted(self.raw_dir.rglob("*.mat"))
         valid_count = 0
         skipped_count = 0
-        for mat_path in tqdm(mat_files, desc="Preprocessing Controlled Sliding"):
+        for mat_path in tqdm(mat_files, desc="Preprocessing Controlled Sliding (Phase 2.4 Vectorized)"):
             if self.process_file(mat_path):
                 valid_count += 1
             else:

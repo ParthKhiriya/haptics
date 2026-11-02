@@ -201,7 +201,7 @@ def evaluate():
 
     # ─── 2. Print Summary Table ───
     print("\n" + "="*80)
-    print("             CONTROLLED SLIDING EVALUATION SUMMARY (Phase 2.3)")
+    print("             CONTROLLED SLIDING EVALUATION SUMMARY (Phase 2.4)")
     print("="*80)
     print(f"{'Category':<16} | {'Metric':<28} | {'Mean ± Std':<20} | {'Ideal':<8}")
     print("-" * 80)
@@ -261,7 +261,7 @@ def evaluate():
     fig, axes = plt.subplots(n_plots, 1, figsize=(12, 3.2 * n_plots), sharex=True)
     if n_plots == 1:
         axes = [axes]
-    fig.suptitle("Controlled Sliding: Power Spectral Density Comparison (Phase 2.3 Acoustic-Guided)", fontsize=16)
+    fig.suptitle("Controlled Sliding: Power Spectral Density Comparison (Phase 2.4 Publication-Grade)", fontsize=16)
 
     for idx, (ax, s) in enumerate(zip(axes, sample_plots_data)):
         freqs = s['freqs']

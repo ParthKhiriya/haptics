@@ -3,7 +3,8 @@ from src.models.decoder_sliding import (
     SEChannelAttention,
     DilatedResBlock,
     AntiCheckerboardUpsampleBlock,
-    DifferentiableTactileFilterbank,
+    MultiScaleEnvelopeFusionTCN,
+    DifferentiableFineSpectralShaper,
     SlidingSEANetDecoder,
     SlidingTactileDecoder,
 )
@@ -13,7 +14,8 @@ __all__ = [
     "SEChannelAttention",
     "DilatedResBlock",
     "AntiCheckerboardUpsampleBlock",
-    "DifferentiableTactileFilterbank",
+    "MultiScaleEnvelopeFusionTCN",
+    "DifferentiableFineSpectralShaper",
     "SlidingSEANetDecoder",
     "SlidingTactileDecoder",
 ]

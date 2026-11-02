@@ -85,7 +85,7 @@ def run_inference_sliding():
                                        tactile_low=30.0, tactile_high=800.0)
 
     print("\n" + "="*60)
-    print("       CONTROLLED SLIDING INFERENCE EVALUATION (Phase 2.3)")
+    print("       CONTROLLED SLIDING INFERENCE EVALUATION (Phase 2.4)")
     print("="*60)
     print(f"Pearson Correlation (PCC): {raw_metrics['pearson_correlation']:.4f} (Filtered: {filt_metrics['pearson_correlation']:.4f})")
     print(f"RMSE:                     {raw_metrics['rmse']:.4f} (Filtered: {filt_metrics['rmse']:.4f})")
@@ -107,7 +107,7 @@ def run_inference_sliding():
     print("4. Plotting Results...")
     fig, axes = plt.subplots(4, 1, figsize=(13, 11))
     title_str = (
-        f"Controlled Sliding (Phase 2.3): Audio-to-Haptic Cross-Modal Synthesis\n"
+        f"Controlled Sliding (Phase 2.4): Audio-to-Haptic Cross-Modal Synthesis\n"
         f"Tactile LSD: {raw_metrics['lsd_tactile_band']:.1f} dB | PSD CosSim: {raw_metrics['psd_cosine_similarity']:.3f} | "
         f"Peak Ratio: {raw_metrics['peak_amplitude_ratio']:.2f}x | RMS Ratio: {raw_metrics['rms_ratio']:.2f}x | "
         f"Centroid Delta: {raw_metrics['spectral_centroid_delta_hz']:.1f} Hz"

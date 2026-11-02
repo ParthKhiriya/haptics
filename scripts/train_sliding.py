@@ -23,14 +23,14 @@ def train_sliding():
     WORKING_SR = 16000
     AUDIO_LENGTH = 16000       # 16000 samples = 1.0 second audio input (aligned 0.3s is in [:4800])
     HAPTIC_LENGTH = 4800       # 4800 samples = 0.3 second haptic target
-    PATIENCE = 40              # Extended patience for Phase 2.3 fine-tuning
+    PATIENCE = 40              # Extended patience for fine-tuning
     
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     processed_dir = PROJECT_ROOT / "data" / "processed_sliding"
     checkpoint_dir = PROJECT_ROOT / "checkpoints"
     checkpoint_dir.mkdir(exist_ok=True)
 
-    print(f"Starting Controlled Sliding Training (Phase 2.3 Acoustic-Guided Overhaul) on {device}...")
+    print(f"Starting Controlled Sliding Training (Phase 2.4 Publication-Grade Overhaul) on {device}...")
     print(f"Sample Rate: {WORKING_SR} Hz | Audio Window: {AUDIO_LENGTH} | Haptic Target: {HAPTIC_LENGTH} | Patience: {PATIENCE}")
 
     # ─── 1. Load Data (Stratified Split) ───
@@ -96,7 +96,7 @@ def train_sliding():
                 'psd': f"{metrics.get('psd', 0.0):.3f}",
                 'cent': f"{metrics.get('cent', metrics.get('centroid', 0.0)):.3f}",
                 'env': f"{metrics.get('env', 0.0):.3f}",
-                'stat': f"{metrics.get('stat', 0.0):.3f}",
+                'phase': f"{metrics.get('phase', 0.0):.3f}",
             })
             
         avg_train_loss = train_loss / len(train_loader)
