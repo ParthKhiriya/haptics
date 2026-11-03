@@ -173,6 +173,14 @@ soundTap (44100 Hz, 5.0s)
 - [x] Full dataset architecture & physical parameters analyzed
 - [x] Conceptual disambiguation: Controlled vs Uncontrolled vs Tap vs Sliding clarified
 - [x] Controlled Tap Synthesis Phase: Validated & Finalized as solid baseline
+- [x] **Controlled-Tap Publication-Grade Upgrade (Branch: `controlled-tap`):**
+  - [x] Phase 1: Sub-millisecond onset detection, GCC-PHAT envelope alignment, analytic envelope utils (`src/data/dataset_tap_utils.py`, `src/data/dataset.py`)
+  - [x] Phase 2: `TransientSEANetDecoder` with `SnakeBeta` periodic activation, `TransientEnvelopeModulator` (FiLM + log-gain head), and `DampedModalResonatorBank` (K=16 modes), with warm-start support (`src/models/decoder.py`)
+  - [x] Phase 3: Physics-informed loss suite (`ControlledTapPublicationLoss`): shift-invariant time loss (vectorized unfolding, Pearson r, SI-SDR), differentiable Hilbert envelope & attack-slope loss, Schroeder backward EDC loss, dual-regime vibrotactile STFT loss with IF/GD phase, psychophysical mechanoreceptor filterbank loss (Pacinian & Meissner) (`src/models/loss.py`)
+  - [x] Phase 4: Multi-period waveform discriminator (`MultiPeriodWaveformDiscriminator` with prime periods 2, 3, 5, 7, 11), LSGAN adversarial and feature matching losses, and `MaterialContrastiveSignatureLoss` (`src/models/discriminator.py`, `src/models/__init__.py`)
+  - [x] Phase 5: 2-stage warm-started curriculum with EMA (decay=0.999) and Publication Composite Validation Score checkpointing (`scripts/train.py`)
+  - [x] Phase 6: 22-metric publication evaluation suite with raw & micro-aligned metrics, Fréchet Haptic Distance (FHD), and Markdown/JSON export (`src/evaluation/metrics.py`, `scripts/evaluate.py`, `scripts/inference.py`)
+  - [x] Phase 7: End-to-end integration and dry-run tests verified successfully.
 - [x] Phase 2 Implementation: Continuous Sliding Texture Synthesis (`sound` -> `accelDFT`)
   - [x] Sliding preprocessor implemented (`src/data/preprocess_sliding.py` & `scripts/run_preprocessing_sliding.py`)
   - [x] Sliding dataset & dataloaders implemented (`src/data/dataset_sliding.py`)
